@@ -1,6 +1,6 @@
 #pragma once
 
-// Certificado raíz de Amazon
+
 const char AWS_ROOT_CA_CERTIFICATE[] PROGMEM = R"EOF(
 -----BEGIN CERTIFICATE-----
 MIIDQTCCAimgAwIBAgITBmyfz5m/jAo54vB4ikPmljZbyjANBgkqhkiG9w0BAQsF
@@ -24,7 +24,6 @@ rqXRfboQnoZsG4q5WTP468SQvvG5
 -----END CERTIFICATE-----
 )EOF";
 
-// Certificado del dispositivo
 const char AWS_CLIENT_CERTIFICATE[] PROGMEM = R"EOF(
 -----BEGIN CERTIFICATE-----
 MIIDWTCCAkGgAwIBAgIUTewH4beI8pZKTsk6C3AwoBj+dtswDQYJKoZIhvcNAQEL
@@ -48,7 +47,6 @@ WNVckHmqlmqDAvkR+a6UWKY+FKO7cFu3L76K46DVT/V9/GpihyLb6jakqsVY
 -----END CERTIFICATE-----
 )EOF";
 
-// Llave privada del dispositivo
 const char AWS_PRIVATE_KEY[] PROGMEM = R"EOF(
 -----BEGIN RSA PRIVATE KEY-----
 MIIEpgIBAAKCAQEA6HemHRpR4Z4IhSPcBFkrRScwP9RiIMtHt2EqY2bYo7khtm/k

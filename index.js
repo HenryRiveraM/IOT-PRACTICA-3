@@ -1,17 +1,26 @@
+// Main Alexa SDK and AWS SDK imports
 const Alexa = require('ask-sdk-core');
 const AWS   = require('aws-sdk');
 
-// ---------- Config AWS IoT y Dynamo ----------
+// ---------- AWS IoT and DynamoDB configuration ----------
 const IotData = new AWS.IotData({
+    // AWS IoT endpoint for this account / region
     endpoint: 'a1acybki981kqw-ats.iot.us-east-2.amazonaws.com'
 });
 
+// DynamoDB client used to map Alexa user → IoT thing
 const dynamodb   = new AWS.DynamoDB.DocumentClient();
 const TABLE_NAME = 'user_thing';
 
 // ================== HELPERS ==================
 
-// Obtiene el thingName desde DynamoDB según el userId de Alexa
+/**
+ * Resolve the IoT thing name associated with the current Alexa user.
+ * 1. Reads the Alexa userId from the request.
+ * 2. Queries DynamoDB table `user_thing` using user_id as partition key.
+ * 3. If a mapping exists, returns the stored thing_name.
+ * 4. If not, falls back to the default thing "iot_thing".
+ */
 async function getThingName(handlerInput) {
     const userId = handlerInput.requestEnvelope.session.user.userId;
 
@@ -32,16 +41,22 @@ async function getThingName(handlerInput) {
             console.log('Thing encontrado:', data.Item.thing_name);
             return data.Item.thing_name;
         } else {
+            // Fallback when no explicit mapping is found for the user
             console.log('No se encontró thing para este usuario, usando por defecto iot_thing');
-            return 'iot_thing';          // <- debe coincidir EXACTO con tu thing
+            return 'iot_thing';          // <- must match the actual IoT thing name
         }
     } catch (err) {
+        // On read error we still fall back to the default thing
         console.log('Error leyendo de DynamoDB:', err);
         return 'iot_thing';
     }
 }
 
-// Lee el shadow REAL del thing
+/**
+ * Retrieve the full AWS IoT Device Shadow for the given thing.
+ * Logs both the raw shadow and the state subsection for debugging.
+ * Returns `payload.state` (object with desired/reported sections) or null on error.
+ */
 async function getShadow(thingName) {
     const params = { thingName };
 
@@ -74,12 +89,17 @@ async function getShadow(thingName) {
 
         return payload.state;
     } catch (err) {
+        // Any failure while reading / parsing the shadow is logged and null is returned
         console.log('Error al obtener el shadow:', err);
         return null;
     }
 }
 
-// Cambia el desired.interiorDoor del shadow (OPEN / CLOSE)
+/**
+ * Update the desired state of `interiorDoor` in the thing's shadow.
+ * `newState` is typically "OPEN" or "CLOSE".
+ * This does not wait for the device to actually move; it only updates the shadow.
+ */
 async function setInteriorDoorDesired(thingName, newState) {
     const payload = {
         state: {
@@ -106,7 +126,7 @@ async function setInteriorDoorDesired(thingName, newState) {
 
 // ================== HANDLERS ==================
 
-// Launch
+// Handles the initial "open skill" request (LaunchRequest)
 const LaunchRequestHandler = {
     canHandle(handlerInput) {
         return Alexa.getRequestType(handlerInput.requestEnvelope) === 'LaunchRequest';
@@ -122,12 +142,12 @@ const LaunchRequestHandler = {
 
         return handlerInput.responseBuilder
             .speak(speakOutput)
-            .reprompt(speakOutput)
+            .reprompt(speakOutput) // Keep session open waiting for a follow-up intent
             .getResponse();
     }
 };
 
-// Abrir puerta interior
+// Handles intent to OPEN the interior door (updates desired state in the shadow)
 const OpenInteriorDoorIntentHandler = {
     canHandle(handlerInput) {
         return Alexa.getRequestType(handlerInput.requestEnvelope) === 'IntentRequest'
@@ -150,7 +170,7 @@ const OpenInteriorDoorIntentHandler = {
     }
 };
 
-// Cerrar puerta interior
+// Handles intent to CLOSE the interior door (updates desired state in the shadow)
 const CloseInteriorDoorIntentHandler = {
     canHandle(handlerInput) {
         return Alexa.getRequestType(handlerInput.requestEnvelope) === 'IntentRequest'
@@ -173,7 +193,7 @@ const CloseInteriorDoorIntentHandler = {
     }
 };
 
-// Consultar estado puerta interior
+// Handles queries for the interior door state (reads from shadow desired/reported)
 const StateInteriorDoorHandler = {
     canHandle(handlerInput) {
         return Alexa.getRequestType(handlerInput.requestEnvelope) === 'IntentRequest'
@@ -187,11 +207,13 @@ const StateInteriorDoorHandler = {
         const thingName   = await getThingName(handlerInput);
         const shadowState = await getShadow(thingName);
 
+        // Default error message if we cannot read the shadow
         let speakOutput = 'No pude obtener el estado de la puerta interior. Intenta de nuevo más tarde.';
 
         if (shadowState) {
             const desired  = shadowState.desired  || {};
             const reported = shadowState.reported || {};
+            // Prefer reported; if not present fall back to desired
             const value = reported.interiorDoor || desired.interiorDoor;
 
             console.log('Estado interiorDoor desde shadow:', value);
@@ -212,7 +234,7 @@ const StateInteriorDoorHandler = {
     }
 };
 
-// Consultar estado puerta exterior
+// Handles queries for the exterior door state (reads from shadow desired/reported)
 const StateExteriorDoorHandler = {
     canHandle(handlerInput) {
         return Alexa.getRequestType(handlerInput.requestEnvelope) === 'IntentRequest'
@@ -226,11 +248,13 @@ const StateExteriorDoorHandler = {
         const thingName   = await getThingName(handlerInput);
         const shadowState = await getShadow(thingName);
 
+        // Default error message if we cannot read the shadow
         let speakOutput = 'No pude obtener el estado de la puerta exterior. Intenta de nuevo más tarde.';
 
         if (shadowState) {
             const desired  = shadowState.desired  || {};
             const reported = shadowState.reported || {};
+            // Prefer reported; if not present fall back to desired
             const value = reported.exteriorDoor || desired.exteriorDoor;
 
             console.log('Estado exteriorDoor desde shadow:', value);
@@ -251,8 +275,11 @@ const StateExteriorDoorHandler = {
     }
 };
 
-// ================== HANDLERS GENÉRICOS ==================
+// ================== GENERIC / BUILT-IN HANDLERS ==================
 
+/**
+ * Standard Help intent. Explains to the user what the skill can do.
+ */
 const HelpIntentHandler = {
     canHandle(handlerInput) {
         return Alexa.getRequestType(handlerInput.requestEnvelope) === 'IntentRequest'
@@ -270,6 +297,9 @@ const HelpIntentHandler = {
     }
 };
 
+/**
+ * Handles both Cancel and Stop built-in intents, ending the conversation.
+ */
 const CancelAndStopIntentHandler = {
     canHandle(handlerInput) {
         return Alexa.getRequestType(handlerInput.requestEnvelope) === 'IntentRequest'
@@ -287,6 +317,9 @@ const CancelAndStopIntentHandler = {
     }
 };
 
+/**
+ * Fallback handler for utterances that do not match any defined intent.
+ */
 const FallbackIntentHandler = {
     canHandle(handlerInput) {
         return Alexa.getRequestType(handlerInput.requestEnvelope) === 'IntentRequest'
@@ -304,16 +337,24 @@ const FallbackIntentHandler = {
     }
 };
 
+/**
+ * Session end handler. Used to log the reason when Alexa closes the session.
+ */
 const SessionEndedRequestHandler = {
     canHandle(handlerInput) {
         return Alexa.getRequestType(handlerInput.requestEnvelope) === 'SessionEndedRequest';
     },
     handle(handlerInput) {
         console.log(`~~~~ Session ended: ${JSON.stringify(handlerInput.requestEnvelope)}`);
+        // No response is required; just return an empty response
         return handlerInput.responseBuilder.getResponse();
     }
 };
 
+/**
+ * Intent reflector: useful for debugging. It simply repeats the intent name
+ * that was triggered. This should remain last in the handler chain.
+ */
 const IntentReflectorHandler = {
     canHandle(handlerInput) {
         return Alexa.getRequestType(handlerInput.requestEnvelope) === 'IntentRequest';
@@ -328,6 +369,11 @@ const IntentReflectorHandler = {
     }
 };
 
+/**
+ * Global error handler. Catches any exception thrown in the skill,
+ * logs diagnostic information (including the Alexa userId if available),
+ * and returns a generic apology message to the user.
+ */
 const ErrorHandler = {
     canHandle() {
         return true;
@@ -353,6 +399,8 @@ const ErrorHandler = {
 };
 
 // ================== EXPORT ==================
+
+// Skill entry point: registers all handlers and exposes the Lambda handler function
 exports.handler = Alexa.SkillBuilders.custom()
     .addRequestHandlers(
         LaunchRequestHandler,
